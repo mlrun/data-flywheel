@@ -32,7 +32,8 @@ def run_generic_eval(
         return previous_result.model_dump()
 
     logger.info(f"Running {eval_type} evaluation")
-    evaluator = Evaluator(llm_judge_config=previous_result.llm_judge_config)
+    llm_judge_config = previous_result.llm_judge_config
+    evaluator = Evaluator(judge_model_config=llm_judge_config.judge_model_config())
     start_time = datetime.utcnow()
 
     tool_eval_types = [None]
@@ -87,7 +88,6 @@ def run_generic_eval(
             )
 
             job_id = evaluator.run_evaluation(
-                namespace=settings.nmp_config.nmp_namespace,
                 dataset_name=previous_result.datasets[dataset_type],
                 workload_type=previous_result.workload_type,
                 target_model=target_model,  # Use the selected target model
@@ -128,7 +128,7 @@ def run_generic_eval(
         try:
             evaluator.wait_for_evaluation(
                 job_id=job["job_id"],
-                evaluation=job["evaluation"],
+                flywheel_run_id=previous_result.flywheel_run_id,
                 polling_interval=5,
                 timeout=3600,
                 progress_callback=job["progress_callback"],

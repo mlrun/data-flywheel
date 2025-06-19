@@ -66,9 +66,11 @@ def spin_up_nim(context: mlrun.MLClientCtx, previous_result: dict, nim_config: d
             logger.info(f"NIM {nim_config.model_name} is already deployed")
 
         def progress_callback(status: dict):
+            current_time = datetime.utcnow()
             db_manager.update_nim_deployment_status(
                 nim_run.id,
                 DeploymentStatus(status.get("status", "unknown")),
+                runtime_seconds=(current_time - start_time).total_seconds()
             )
 
         dms_client.wait_for_deployment(progress_callback=progress_callback)

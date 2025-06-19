@@ -30,7 +30,7 @@ def setup(
         return project
 
     project.set_source(source, pull_at_runtime=True)
-    project.set_default_image(f"{registry}/nvidia-data-flywheel:latest")
+    project.set_default_image(f"{registry}/mlrun-data-flywheel:latest")
     if ngc_api_key:
         project.set_secrets(secrets={'NGC_API_KEY': ngc_api_key})
 

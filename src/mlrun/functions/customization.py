@@ -79,7 +79,6 @@ def start_customization(context: mlrun.MLClientCtx, previous_result: dict) -> Ta
     try:
         # Start customization job
         customization_job_id, customized_model = customizer.start_training_job(
-            namespace=settings.nmp_config.nmp_namespace,
             name=f"customization-{workload_id}-{target_llm_model}",
             base_model=previous_result.nim.model_name,
             output_model_name=output_model_name,
@@ -96,9 +95,16 @@ def start_customization(context: mlrun.MLClientCtx, previous_result: dict) -> Ta
         progress_callback({"customized_model": customized_model})
 
         # Wait for completion with progress updates
-        customizer.wait_for_customization(customization_job_id, progress_callback=progress_callback)
+        customizer.wait_for_customization(
+            customization_job_id,
+            flywheel_run_id=previous_result.flywheel_run_id,
+            progress_callback=progress_callback,
+        )
 
-        customizer.wait_for_model_sync(customized_model)
+        customizer.wait_for_model_sync(
+            flywheel_run_id=previous_result.flywheel_run_id,
+            customized_model=customized_model,
+        )
 
         # Update completion status
         finished_time = datetime.utcnow()

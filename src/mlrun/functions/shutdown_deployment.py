@@ -1,9 +1,9 @@
-from datetime import datetime
 from collections.abc import Callable
 
 from src.api.db_manager import TaskDBManager
 from src.api.models import TaskResult
 from src.config import settings
+from src.lib.flywheel.cancellation import FlywheelCancelledError, check_cancellation
 from src.lib.nemo.dms_client import DMSClient
 from src.log_utils import setup_logging
 import mlrun
@@ -31,38 +31,45 @@ def shutdown_deployment(
             validator=lambda r: getattr(r, "nim", None) is not None,
             error_msg="No valid TaskResult with NIM config found in results",
         )
-        if (
-            previous_result.llm_judge_config
-            and previous_result.llm_judge_config.model_name == previous_result.nim.model_name
-        ):
-            logger.info(
-                f"Skip shutting down NIM {previous_result.nim.model_name} as it is the same as the LLM Judge"
-            )
-            return previous_result.model_dump(mode="json")
-
-        logger.info(f"Shutting down NIM {previous_result.nim.model_name} in {settings.nmp_config.nmp_namespace} namespace")
-        dms_client = DMSClient(nmp_config=settings.nmp_config, nim=previous_result.nim)
-        dms_client.shutdown_deployment()
-
-        # Mark the NIM run as completed now that the deployment is shut down
+        # Mark the NIM run as completed first
+        # This will ensure that the NIM run is marked as completed
+        # even if the deployment is not shut down in case if the llm judge is same as the NIM.
         try:
             nim_run_doc = db_manager.find_nim_run(
                 previous_result.flywheel_run_id,
                 previous_result.nim.model_name,
             )
             if nim_run_doc:
-                finished_time = datetime.utcnow()
-                started_at = nim_run_doc.get("started_at")
-                runtime_seconds: float = 0.0
-                if started_at:
-                    runtime_seconds = (finished_time - started_at).total_seconds()
-
-                db_manager.mark_nim_completed(nim_run_doc["_id"], finished_time, runtime_seconds)
+                if _check_cancellation(previous_result.flywheel_run_id, raise_error=False):
+                    db_manager.mark_nim_cancelled(
+                        nim_run_doc["_id"],
+                        error_msg="Flywheel run cancelled",
+                    )
+                else:
+                    db_manager.mark_nim_completed(nim_run_doc["_id"], nim_run_doc["started_at"])
         except Exception as update_err:
             logger.error("Failed to update NIM run status to COMPLETED: %s", update_err)
 
+        if (
+                previous_result.llm_judge_config
+                and not previous_result.llm_judge_config.is_remote
+                and previous_result.llm_judge_config.model_name == previous_result.nim.model_name
+        ):
+            logger.info(
+                f"Skip shutting down NIM {previous_result.nim.model_name} as it is the same as the LLM Judge"
+            )
+            return previous_result.model_dump(mode="json")
+
+        dms_client = DMSClient(
+            nmp_config=settings.nmp_config,
+            nim=previous_result.nim,
+        )
+        # Shutdown the NIM deployment
+        dms_client.shutdown_deployment()
+
         return previous_result.model_dump(mode="json")
     except Exception as e:
+        # if any error occurs in the shutdown deployment step, we need to mark the NIM run as failed.
         error_msg = f"Error shutting down NIM deployment: {e!s}"
         logger.error(error_msg)
 
@@ -111,3 +118,14 @@ def _extract_previous_result(
     # Nothing matched - raise so caller can handle
     logger.error(error_msg)
     raise ValueError(error_msg)
+
+def _check_cancellation(flywheel_run_id, raise_error=False):
+    try:
+        check_cancellation(flywheel_run_id)
+    except FlywheelCancelledError as e:
+        logger.info(f"Flywheel run cancelled: {e}")
+        if raise_error:
+            raise e
+        return True
+    return False
+

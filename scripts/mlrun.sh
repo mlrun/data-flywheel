@@ -70,6 +70,10 @@ eval "$(minikube docker-env)"
 docker build -t "$DOCKER_SERVER"/mlrun-data-flywheel:latest -f deploy/mlrun/Dockerfile .
 docker push "$DOCKER_SERVER"/mlrun-data-flywheel:latest
 
+# Clone the mlrun repository into the mlrun-jupyter pod:
+kubectl exec -n $MLRUN_NAMESPACE "$(kubectl get ep mlrun-jupyter -n $MLRUN_NAMESPACE -o jsonpath='{.subsets[*].addresses[*].targetRef.name}')" -- \
+  git clone https://github.com/mlrun/nvidia-data-flywheel.git
+
 # Port forward all essential services and afterwards expose them in the UI:
 kubectl port-forward --namespace $MLRUN_NAMESPACE service/mlrun-jupyter 30040:8888 --address=0.0.0.0 &
 kubectl port-forward --namespace $MLRUN_NAMESPACE service/nuclio-dashboard 30050:8070 --address=0.0.0.0 &
